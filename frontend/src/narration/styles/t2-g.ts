@@ -755,54 +755,6 @@ export const T2_G_NARRATION_READING_RULES_STYLES = `
     }
   }
 
-  @media (max-width: 560px) {
-    .anw-reading-rules-panel,
-    .anw-reading-status,
-    .anw-reading-preferences-panel,
-    .anw-reading-rules-workspace {
-      border-radius: 13px;
-      padding: 14px;
-    }
-
-    .anw-reading-rules-panel > footer,
-    .anw-reading-preferences-panel__header,
-    .anw-reading-preferences-panel__section-heading,
-    .anw-scope-overrides-panel__body > header,
-    .anw-scope-overrides-panel footer,
-    .anw-reading-status__issues li {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .anw-reading-status__grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-reading-preferences-panel fieldset > label:has(input[type="range"]),
-    .anw-reading-preferences-panel__advanced > div,
-    .anw-scope-overrides-panel__advanced > div,
-    .anw-reading-preferences-panel__pause-presets,
-    .anw-scope-overrides-panel__pause-presets,
-    .anw-scope-overrides-panel__checks {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-reading-preferences-panel fieldset > label:has(input[type="range"]) input {
-      grid-column: 1;
-    }
-
-    .anw-scope-overrides-panel > summary {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .anw-reading-rules-panel button,
-    .anw-reading-status button,
-    .anw-reading-preferences-panel button,
-    .anw-scope-overrides-panel button {
-      width: 100%;
-    }
-  }
 `;
 
 

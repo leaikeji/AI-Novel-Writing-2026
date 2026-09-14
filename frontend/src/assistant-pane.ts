@@ -588,7 +588,6 @@ export function renderQwenPawAssistantPane(
         opacity: layout.collapsed ? 0 : 1,
         pointerEvents: layout.collapsed ? "none" : "auto",
         position: "absolute",
-        touchAction: "none",
         top: 0,
         userSelect: "none",
         width: "6px",

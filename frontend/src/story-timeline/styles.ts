@@ -27,7 +27,6 @@ export function ensureStoryTimelineStyles(): void {
     .anw-instance-summary dl div { display:grid; grid-template-columns:minmax(72px,auto) 1fr; gap:12px; align-items:start; }
     .anw-instance-summary dt { color:rgba(0,0,0,.58); }
     .anw-instance-summary dd { margin:0; overflow-wrap:anywhere; }
-    @media (max-width: 760px) { .anw-timeline-grid { grid-template-columns:1fr; } .anw-timeline-header { flex-direction:column; } .anw-timeline-header-actions { justify-content:flex-start; } }
   `;
   document.head.appendChild(style);
 }

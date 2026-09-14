@@ -334,11 +334,10 @@ describe("reading status surface", () => {
     expect(model.runtimeLabel).toBe("本地语音服务尚未就绪");
   });
 
-  it("keeps styles scoped, responsive and keyboard-visible", () => {
+  it("keeps styles scoped and keyboard-visible", () => {
     expect(T2_G_NARRATION_READING_RULES_STYLES).toContain(".anw-reading-rules-panel");
     expect(T2_G_NARRATION_READING_RULES_STYLES).toContain(".anw-reading-status");
     expect(T2_G_NARRATION_READING_RULES_STYLES).toContain(":focus-visible");
-    expect(T2_G_NARRATION_READING_RULES_STYLES).toContain("@media (max-width: 560px)");
     expect(T2_G_NARRATION_READING_RULES_STYLES).not.toMatch(/(^|\n)\s*(button|input|section)\s*\{/);
   });
 });

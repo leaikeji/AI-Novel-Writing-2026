@@ -57,12 +57,6 @@ export function ensureTtsCloudConfigStyles(): void {
       box-shadow: 0 14px 40px rgba(0, 0, 0, .14);
     }
     .anw-tts-cloud-config audio { width: min(520px, 100%); }
-    @media (max-width: 720px) {
-      .anw-tts-cloud-config { padding: 16px; }
-      .anw-tts-cloud-config__header { flex-direction: column; }
-      .anw-tts-cloud-config__form,
-      .anw-tts-cloud-config dl { grid-template-columns: minmax(0, 1fr); }
-    }
   `;
   document.head.appendChild(style);
 }

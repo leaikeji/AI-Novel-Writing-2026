@@ -39,7 +39,6 @@ describe("workbench equal-height layout styles", () => {
     expect(studioSource).toContain('studioSection === "outline" ? " is-outline" : ""');
     expect(styleSource).toContain(".mb-panel-body.is-outline { padding-bottom:28px;");
     expect(styleSource).toContain(".anw-workbench-frame[data-assistant-density=\"constrained\"] .mb-panel-body.is-outline { padding-bottom:16px;");
-    expect(styleSource).toContain(".mb-panel-body.is-outline { padding-bottom:14px;");
     expect(styleSource).toMatch(/\.mb-outline-step-body\.is-count>\.qwenpaw-input-number \{[^}]*overflow:hidden;[^}]*border-radius:12px;/);
     expect(styleSource).toMatch(/\.qwenpaw-input-number-input \{[^}]*border-radius:11px;[^}]*background:transparent!important;/);
   });
@@ -54,9 +53,4 @@ describe("workbench equal-height layout styles", () => {
     expect(styleSource).toContain(".mb-outline-step:focus-visible .mb-outline-step-dot");
   });
 
-  it("keeps the existing mobile stacked layout override", () => {
-    expect(styleSource).toMatch(/@media \(max-width: 720px\)[\s\S]*?\.mb-workbench,[\s\S]*?display:block;[\s\S]*?height:auto;/);
-    expect(styleSource).toMatch(/@media \(max-width: 720px\)[\s\S]*?\.anw-workbench-main \{[\s\S]*?overflow-y:auto;/);
-    expect(styleSource).toContain(".mb-back-center-wrap { grid-column:1/-1; margin:10px 0 0;");
-  });
 });

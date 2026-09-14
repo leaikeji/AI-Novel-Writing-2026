@@ -31,7 +31,7 @@ describe("character workspace desktop layout contract", () => {
     expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-state-layout");
     expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-fact-card");
     expect(CHARACTER_WORKSPACE_CSS).not.toContain("anw-character-fact-table-row");
-    expect(CHARACTER_WORKSPACE_CSS).toContain("@media (max-width: 640px)");
+    expect(CHARACTER_WORKSPACE_CSS).toContain("@media (max-width: 980px)");
     expect(CHARACTER_WORKSPACE_CSS).toContain("max-height: calc(100dvh - 48px)");
     expect(CHARACTER_WORKSPACE_CSS).toContain("position: sticky");
     expect(CHARACTER_WORKSPACE_CSS).toContain("anw-character-workspace-tabs { display: flex; flex: 0 0 auto");

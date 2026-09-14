@@ -422,7 +422,6 @@ describe("reading page accessibility contract", () => {
     expect(buttons.filter((button) => button.props["aria-current"] === "page")).toHaveLength(1);
     expect(findAll(tree, (element) => element.props.role === "button")).toHaveLength(0);
 
-    expect(T2_B_READING_STYLES).toContain("@media (max-width: 760px)");
     expect(T2_B_READING_STYLES).toContain(".anw-reading-layout");
     expect(T2_B_READING_STYLES).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(T2_B_READING_STYLES).toContain(".anw-reading-nav");
@@ -438,7 +437,6 @@ describe("reading page accessibility contract", () => {
     expect(T2_G_NARRATION_READING_RULES_STYLES).toContain(".anw-reading-rules-panel");
     expect(T2_G_NARRATION_READING_RULES_STYLES).toContain(".anw-reading-status");
     expect(T2_G_NARRATION_READING_RULES_STYLES).toContain(":focus-visible");
-    expect(T2_G_NARRATION_READING_RULES_STYLES).toContain("@media (max-width: 560px)");
   });
 
   it("keeps every existing local panel labelled while disabled controls explain why", () => {

@@ -750,19 +750,3 @@ describe("script review failures", () => {
     });
   });
 });
-
-
-describe("script review responsive layout", () => {
-  it("collapses the workspace and removes the inset shell on narrow screens", () => {
-    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 768px)");
-    expect(T4_CHAPTER_NARRATION_STYLES).toMatch(
-      /@media \(max-width: 768px\)[\s\S]*?\.anw-script-review-shell\s*\{[\s\S]*?inset: 0;[\s\S]*?width: 100%;/,
-    );
-    expect(T4_CHAPTER_NARRATION_STYLES).toMatch(
-      /@media \(max-width: 768px\)[\s\S]*?\.anw-script-review__workspace\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/,
-    );
-    expect(T4_CHAPTER_NARRATION_STYLES).toMatch(
-      /@media \(max-width: 768px\)[\s\S]*?\.anw-script-review__guide\s*\{[\s\S]*?position: static;/,
-    );
-  });
-});

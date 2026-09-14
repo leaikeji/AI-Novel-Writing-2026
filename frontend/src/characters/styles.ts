@@ -239,17 +239,6 @@ export const CHARACTER_WORKSPACE_CSS = `
   .anw-character-source-viewer { width:min(720px,100%); }
 }
 
-@media (max-width: 640px) {
-  .anw-character-workspace-backdrop { padding:0; }
-  .anw-character-workspace-dialog { width:100vw; max-height:100dvh; border-radius:0; }
-  .anw-character-state-slots,.anw-character-workspace-selectors { grid-template-columns:1fr; }
-  .anw-character-recent-row,.anw-character-fact-card { grid-template-columns:1fr; }
-  .anw-character-fact-card-field--fact,.anw-character-fact-card > .anw-character-row-actions { grid-column:auto; }
-  .anw-character-recent-row > .anw-character-row-actions { justify-content:flex-start; }
-  .anw-character-subsection-heading { align-items:flex-start; flex-direction:column; }
-  .anw-character-fact-filters { justify-content:flex-start; margin-left:0; }
-  .anw-character-drawer,.anw-character-source-viewer { width:100%; }
-}
 `;
 
 export function ensureCharacterWorkspaceStyles(): void {

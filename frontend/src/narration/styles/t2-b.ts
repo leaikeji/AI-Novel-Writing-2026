@@ -554,35 +554,5 @@ export const T2_B_READING_STYLES = String.raw`
     }
   }
 
-  @media (max-width: 760px) {
-    .anw-reading-page { padding: 16px; }
 
-    .anw-reading-page-header,
-    .anw-reading-section-heading {
-      flex-direction: column;
-    }
-
-    .anw-reading-form-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-reading-inline-fields,
-    .anw-reading-scope-rules {
-      grid-template-columns: minmax(0, 1fr);
-    }
-  }
-
-  @media (max-width: 480px) {
-    .anw-reading-status-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-reading-overview,
-    .anw-reading-narrator-panel,
-    .anw-reading-scope-panel,
-    .anw-reading-integration-slot {
-      padding: 14px;
-      border-radius: 12px;
-    }
-  }
 `;

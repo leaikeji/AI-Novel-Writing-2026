@@ -728,72 +728,6 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     }
   }
 
-  @media (max-width: 720px) {
-    .anw-editor-content.has-chapter-narration {
-      display: block;
-      height: auto;
-      min-height: 100%;
-      overflow: visible;
-    }
-
-    .anw-editor-content.has-chapter-narration > .anw-editor-scroll {
-      min-height: 0;
-      overflow: visible;
-      padding-bottom: 16px;
-    }
-
-    .anw-chapter-narration-player {
-      position: sticky;
-      z-index: 0;
-      bottom: 0;
-      width: 100%;
-      margin: 0;
-      border-right: 0;
-      border-left: 0;
-      border-radius: 12px 12px 0 0;
-      padding-inline: 8px;
-    }
-
-    .anw-chapter-narration-player__compact {
-      grid-template-columns: minmax(70px, 1fr) auto minmax(70px, 1fr);
-      gap: 4px;
-    }
-
-    .anw-chapter-narration-player__speaker-icon,
-    .anw-chapter-narration-more span {
-      display: none;
-    }
-
-    .anw-chapter-narration-player__tools {
-      gap: 0;
-    }
-
-    .anw-chapter-narration-rate__select {
-      width: 56px;
-    }
-
-    .anw-chapter-narration-details {
-      right: 8px;
-      width: calc(100% - 16px);
-      max-height: min(58dvh, 480px);
-    }
-
-    .anw-chapter-narration-notice {
-      min-height: 44px;
-      padding-left: 9px;
-    }
-
-    .anw-chapter-narration-failures__header,
-    .anw-chapter-narration-failure {
-      align-items: stretch;
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-chapter-narration-failures__header {
-      display: grid;
-      gap: 3px;
-    }
-  }
 
   @media (forced-colors: active) {
     .anw-chapter-narration-player,
@@ -1046,63 +980,6 @@ export const T4_CHAPTER_NARRATION_STYLES = String.raw`
     color: #fff;
   }
 
-  @media (max-width: 768px) {
-    .anw-script-review-shell {
-      inset: 0;
-      width: 100%;
-      border: 0;
-      border-radius: 0;
-    }
-
-    .anw-script-review__header,
-    .anw-script-review__footer,
-    .anw-script-review__snapshot,
-    .anw-script-review__filters,
-    .anw-script-review__snapshot-choice,
-    .anw-script-review__error,
-    .anw-script-review__global-issues {
-      padding-inline: 14px;
-    }
-
-    .anw-script-review__header {
-      gap: 12px;
-      padding-block: 14px 12px;
-    }
-
-    .anw-script-review__compact-player {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 10px;
-      padding-inline: 14px;
-    }
-
-    .anw-script-review__compact-player-actions,
-    .anw-script-review__segment-actions {
-      flex-wrap: wrap;
-    }
-
-    .anw-script-review__workspace {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 12px;
-      padding: 0 14px 16px;
-    }
-
-    .anw-script-review__guide {
-      position: static;
-    }
-
-    .anw-script-review__segment-actions button {
-      flex: 1 1 150px;
-    }
-
-    .anw-script-review__footer {
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .anw-script-review__footer button {
-      flex: 1 0 100%;
-    }
-  }
 
   .anw-narration-edition-confirm__copy {
     display: grid;

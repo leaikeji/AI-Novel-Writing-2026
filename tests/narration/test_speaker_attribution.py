@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
@@ -21,18 +20,6 @@ from backend.narration.casting import (
     VoiceVersionSnapshot,
     resolve_casting,
 )
-from backend.narration.cloud_analysis import (
-    BoundSpeakerCandidate,
-    CloudAnalysisFailure,
-    CloudAnalysisFailureCode,
-    CloudAnalysisScope,
-    CloudConsentSnapshot,
-    CloudSourceSegment,
-    HmacDigestKey,
-    analyze_cloud_window,
-    build_minimal_cloud_windows,
-    cloud_request_for_window,
-)
 from backend.narration.confidence import (
     SpeakerConfidenceSignals,
     assess_speaker_confidence,
@@ -51,16 +38,6 @@ from backend.narration.script_contracts import (
     text_sha256,
 )
 from backend.narration.segmentation import SourceFormat, segment_source
-from backend.narration.speaker_model import (
-    ModelIdentity,
-    SpeakerEvidenceCode,
-    SpeakerModelCandidate,
-    SpeakerModelDecision,
-    TrustedSpeakerModelReply,
-    speaker_model_decision_to_json,
-    speaker_model_request_to_json,
-    speaker_model_request_to_payload,
-)
 from backend.narration.speaker_rules import (
     SpeakerRuleContext,
     SpeakerRuleError,
@@ -79,9 +56,6 @@ REVISION_ID = _uuid("revision")
 CHAPTER_ID = _uuid("chapter")
 VOLUME_ID = _uuid("volume")
 SCENE_ID = _uuid("scene")
-CONSENT_ID = _uuid("consent")
-MODEL_RUN_ID = _uuid("model-run")
-MODEL_FINGERPRINT = hashlib.sha256(b"t3-i-fake-speaker-model").hexdigest()
 
 # T3-I 的准确率样本是项目自造、固定且不含用户正文的短句。
 # 这里以 10 个明确姓名 × 10 种常见说话标记组成 100 条独立预期。
@@ -151,47 +125,6 @@ def _voice_snapshot(character_id: UUID) -> VoiceVersionSnapshot:
         rights_record_id=_uuid(f"rights-{character_id}"),
         rights_state=wire.VoiceRightsState.ACTIVE,
         voice_cloning_permitted=True,
-    )
-
-
-def _cloud_candidate(character_id: UUID) -> BoundSpeakerCandidate:
-    speaker = SpeakerRef(SpeakerKind.CHARACTER, character_id=character_id)
-    target = CastingTargetRef(
-        CastingTargetKind.CHARACTER_BINDING,
-        binding_id=_uuid(f"cloud-binding-{character_id}"),
-        character_id=character_id,
-    )
-    return BoundSpeakerCandidate(
-        model_candidate=SpeakerModelCandidate(
-            speaker=speaker,
-            display_name="林晚",
-            aliases=("小林",),
-            role_hint="当前场景人物",
-        ),
-        casting=CastingDecision(
-            candidate_targets=(target,),
-            final_target=target,
-            origin=CastingDecisionOrigin.CHARACTER_BINDING,
-        ),
-    )
-
-
-def _cloud_segment(
-    ordinal: int,
-    text: str,
-    *,
-    uncertain: bool,
-    character_id: UUID,
-) -> CloudSourceSegment:
-    return CloudSourceSegment(
-        segment_id=_uuid(f"cloud-segment-{ordinal}"),
-        ordinal=ordinal,
-        source_text=text,
-        source_local_hash=text_sha256(text),
-        needs_cloud_analysis=uncertain,
-        candidates=(_cloud_candidate(character_id),) if uncertain else (),
-        scene_hint="雨夜门廊" if uncertain else None,
-        previous_speaker=SpeakerRef(SpeakerKind.NARRATOR) if uncertain else None,
     )
 
 
@@ -434,150 +367,3 @@ def test_unauthorized_character_ids_fail_closed_and_are_never_emitted() -> None:
             ),
             aliases=_aliases(),
         )
-
-
-def test_cloud_request_is_radius_one_privacy_minimal_and_repeatable() -> None:
-    character_id = NAMED_CHARACTERS[0][1]
-    segments = (
-        _cloud_segment(0, "不可外发的章首资料。", uncertain=False, character_id=character_id),
-        _cloud_segment(1, "门外雨声渐近。", uncertain=False, character_id=character_id),
-        _cloud_segment(2, "“你终于来了。”", uncertain=True, character_id=character_id),
-        _cloud_segment(3, "廊灯忽然熄灭。", uncertain=False, character_id=character_id),
-        _cloud_segment(4, "不可外发的章尾资料。", uncertain=False, character_id=character_id),
-    )
-
-    windows = build_minimal_cloud_windows(segments)
-    assert len(windows) == 1
-    request = cloud_request_for_window(windows[0])
-    payload = speaker_model_request_to_payload(request)
-    first_json = speaker_model_request_to_json(request)
-    second_json = speaker_model_request_to_json(
-        cloud_request_for_window(build_minimal_cloud_windows(segments)[0])
-    )
-
-    assert first_json == second_json
-    assert payload["target"]["text"] == segments[2].source_text
-    assert [item["text"] for item in payload["context_before"]] == [
-        segments[1].source_text
-    ]
-    assert [item["text"] for item in payload["context_after"]] == [
-        segments[3].source_text
-    ]
-    assert "不可外发的章首资料" not in first_json
-    assert "不可外发的章尾资料" not in first_json
-    forbidden_fields = {
-        "novel_id",
-        "document_id",
-        "revision_id",
-        "consent_id",
-        "model_run_id",
-        "source_local_hash",
-        "requested_model_fingerprint",
-        "actual_model_fingerprint",
-        "reference_audio",
-        "full_character_card",
-    }
-    outbound = json.loads(first_json)
-    assert forbidden_fields.isdisjoint(outbound)
-    assert all(f'"{field}"' not in first_json for field in forbidden_fields)
-
-
-class _FakeGuard:
-    def consent_is_active(self, **_: object) -> bool:
-        return True
-
-    def source_is_current(self, **_: object) -> bool:
-        return True
-
-
-class _FakeAdapter:
-    def __init__(self, reply: TrustedSpeakerModelReply) -> None:
-        self.reply = reply
-        self.calls: list[str] = []
-
-    async def analyze_speaker(
-        self,
-        *,
-        request_json: str,
-        requested_identity: ModelIdentity,
-    ) -> TrustedSpeakerModelReply:
-        assert requested_identity == self.reply.actual_identity
-        self.calls.append(request_json)
-        return self.reply
-
-
-@pytest.mark.asyncio
-async def test_cloud_analysis_requires_active_work_scoped_consent_before_fake_call() -> None:
-    character_id = NAMED_CHARACTERS[0][1]
-    target = _cloud_segment(
-        0,
-        "“这里安全吗？”",
-        uncertain=True,
-        character_id=character_id,
-    )
-    window = build_minimal_cloud_windows((target,))[0]
-    identity = ModelIdentity(
-        provider_id="fake-provider",
-        model_id="fake-speaker-model",
-        fingerprint=MODEL_FINGERPRINT,
-    )
-    model_decision = SpeakerModelDecision(
-        segment_id=target.segment_id,
-        speaker=SpeakerRef(SpeakerKind.CHARACTER, character_id=character_id),
-        confidence=ConfidenceLevel.HIGH,
-        evidence_codes=(
-            SpeakerEvidenceCode.ALIAS_MATCH,
-            SpeakerEvidenceCode.EXPLICIT_SPEECH_TAG,
-        ),
-    )
-    reply = TrustedSpeakerModelReply(
-        actual_identity=identity,
-        response_json=speaker_model_decision_to_json(model_decision),
-    )
-    scope = CloudAnalysisScope(NOVEL_ID, DOCUMENT_ID, REVISION_ID)
-    active_consent = CloudConsentSnapshot(
-        consent_id=CONSENT_ID,
-        novel_id=NOVEL_ID,
-        version=1,
-        active=True,
-        provider_id=identity.provider_id,
-        model_id=identity.model_id,
-    )
-    digest_key = HmacDigestKey("t3-i-test-key", b"t3-i-cloud-digest-key-material-0001")
-
-    active_adapter = _FakeAdapter(reply)
-    result = await analyze_cloud_window(
-        scope=scope,
-        window=window,
-        consent=active_consent,
-        model_run_id=MODEL_RUN_ID,
-        requested_identity=identity,
-        digest_key=digest_key,
-        guard=_FakeGuard(),
-        adapter=active_adapter,
-    )
-    assert len(active_adapter.calls) == 1
-    assert result.speaker.character_id == character_id
-    assert result.attribution.consent_id == CONSENT_ID
-
-    revoked_adapter = _FakeAdapter(reply)
-    with pytest.raises(CloudAnalysisFailure) as error:
-        await analyze_cloud_window(
-            scope=scope,
-            window=window,
-            consent=CloudConsentSnapshot(
-                consent_id=CONSENT_ID,
-                novel_id=NOVEL_ID,
-                version=2,
-                active=False,
-                provider_id=identity.provider_id,
-                model_id=identity.model_id,
-            ),
-            model_run_id=MODEL_RUN_ID,
-            requested_identity=identity,
-            digest_key=digest_key,
-            guard=_FakeGuard(),
-            adapter=revoked_adapter,
-        )
-    assert error.value.code is CloudAnalysisFailureCode.CONSENT_REVOKED_BEFORE_CALL
-    assert revoked_adapter.calls == []

@@ -515,7 +515,6 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     scrollbar-color: rgba(103, 110, 124, .42) transparent;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
-    touch-action: pan-y;
   }
 
   .anw-character-voice-drawer__body::-webkit-scrollbar {
@@ -678,49 +677,4 @@ export const T2_C_CHARACTER_VOICE_PANEL_STYLES = `
     }
   }
 
-  @media (max-width: 768px) {
-    .anw-character-voice-roster__header {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .anw-character-voice-roster__card {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-character-voice-roster__result,
-    .anw-character-voice-roster__actions {
-      grid-column: 1;
-    }
-
-    .anw-character-voice-roster__actions {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .anw-character-voice-roster__actions button,
-    .anw-character-voice-roster__batch {
-      width: 100%;
-    }
-
-    .anw-character-voice-drawer {
-      width: 100vw;
-      height: 100dvh;
-    }
-
-    .anw-character-voice-drawer__header,
-    .anw-character-voice-drawer__body {
-      padding-inline: 14px;
-    }
-
-    .anw-character-voice-configurator__match {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-character-voice-configurator__match button,
-    .anw-character-voice-configurator__match button.anw-character-voice-configurator__secondary {
-      grid-column: 1;
-      width: 100%;
-    }
-  }
 `;

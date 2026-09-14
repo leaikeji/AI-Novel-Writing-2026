@@ -397,7 +397,6 @@ describe("renderQwenPawAssistantPane", () => {
     expect(separator.props["aria-valuenow"]).toBe(380);
     expect(separator.props["aria-controls"]).toBe("anw-qwenpaw-assistant-inner");
     expect(separator.props["aria-orientation"]).toBe("vertical");
-    expect((separator.props.style as Record<string, unknown>).touchAction).toBe("none");
     expect(toggle.props["aria-controls"]).toBe("anw-qwenpaw-assistant-inner");
     expect((toggle.props.style as Record<string, unknown>).zIndex).toBe(5);
     (separator.props.onKeyDown as (event: unknown) => void)({

@@ -537,7 +537,7 @@ describe("pronunciation panel", () => {
     expect(source?.props.value).not.toBe("MOSS");
   });
 
-  it("restores host focus on destroy and exports only a local responsive style fragment", () => {
+  it("restores host focus on destroy and exports only a locally scoped style fragment", () => {
     const onReturnFocus = vi.fn();
     const api: PronunciationPanelApi = {
       getPronunciationProfile: vi.fn(() => (
@@ -553,7 +553,6 @@ describe("pronunciation panel", () => {
     harness.unmount();
 
     expect(onReturnFocus).toHaveBeenCalledTimes(1);
-    expect(T2_F_NARRATION_SETTINGS_PANEL_STYLES).toContain("@media (max-width: 560px)");
     expect(T2_F_NARRATION_SETTINGS_PANEL_STYLES).toContain(".anw-pronunciation-panel");
     expect(T2_F_NARRATION_SETTINGS_PANEL_STYLES).not.toContain(".anw-workbench");
   });

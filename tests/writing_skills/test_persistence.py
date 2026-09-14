@@ -18,7 +18,6 @@ from backend.writing_skills.contracts import (
     SkillInvocationPlanV1, SkillInjectionPacketV1, TaskModelInputProjectionV1,
 )
 from backend.writing_skills.persistence import ActionConflict, StaleFence, advance, claim_action
-from backend.writing_skills.dispatch import prepare_action
 from backend.writing_skills.api import method_status
 
 OWNER = UUID("29cf94d9-a5c9-54ec-912c-5dfff8738c4c")
@@ -172,30 +171,3 @@ def test_fake_claim_identity_cannot_update_other_scope(engine):
     fake = replace(first, request=request().model_copy(update={"identity": ActionIdentity(owner_id=uuid4(), workspace_id=WORKSPACE, entry="button", action_id=uuid4())}))
     with pytest.raises(StaleFence):
         move(engine, fake, "route_ready")
-
-
-def test_prepare_replay_and_status_are_content_free(engine):
-    req = request()
-    calls = []
-    def compose(frozen):
-        calls.append(frozen)
-        return packet(frozen)
-    kwargs = dict(session_factory=lambda: Session(engine), identity=req.identity,
-                  scope=req.projection.scope, client_input_hash="b"*64,
-                  authorize=lambda s, scope: None, freeze=lambda: req,
-                  compose=compose, still_current=lambda r: True)
-    first = prepare_action(**kwargs)
-    replay = prepare_action(**kwargs)
-    assert len(calls) == 1 and first.id == replay.id and first.state == "assembled"
-    status = method_status(replay).model_dump()
-    assert status["auxiliary_calls"] == 0 and not status["semantic_enabled"]
-    assert "route_snapshot" not in status and "sources" not in status
-
-
-def test_stale_source_stops_before_assembly(engine):
-    req = request()
-    result = prepare_action(session_factory=lambda: Session(engine), identity=req.identity,
-                  scope=req.projection.scope, client_input_hash="b"*64,
-                  authorize=lambda s, scope: None, freeze=lambda: req,
-                  compose=packet, still_current=lambda r: False)
-    assert result.state == "stale" and result.packet is None

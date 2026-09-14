@@ -632,7 +632,6 @@ describe("CharacterVoicePanel", () => {
     expect(textContent(tree)).toContain("已有朗读不会改变");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(":focus-visible");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("repeat(4, minmax(0, 1fr))");
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");
   });
 
   it("fails closed without read authorization and makes no API request", async () => {

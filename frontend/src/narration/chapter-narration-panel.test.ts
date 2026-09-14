@@ -476,8 +476,6 @@ describe("chapter narration panel", () => {
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain(".anw-chapter-narration-player__metrics");
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain(".anw-chapter-narration-status-grid");
     expect(T4_CHAPTER_NARRATION_STYLES).not.toContain(".anw-chapter-narration-source");
-    expect(T4_CHAPTER_NARRATION_STYLES).toContain("@media (max-width: 720px)");
-    expect(T4_CHAPTER_NARRATION_STYLES).toContain("z-index: 0;");
   });
 
   it("renders speaker, transport, and tools as three semantic zones without a sentence excerpt", () => {

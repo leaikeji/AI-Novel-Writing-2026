@@ -21,7 +21,6 @@ describe("creative center recoverable deletion", () => {
     expect(source).toContain('label: "回收站"');
     expect(source).toContain('view === "recycle-bin"');
     expect(styles).toContain(".mb-recycle-card");
-    expect(styles).toContain("@media (max-width:720px)");
     expect(source).not.toContain("清空回收站");
   });
 

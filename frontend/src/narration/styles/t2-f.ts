@@ -422,42 +422,5 @@ export const T2_F_NARRATION_SETTINGS_PANEL_STYLES = `
     background: #eef9f1;
   }
 
-  @media (max-width: 720px) {
-    .anw-pronunciation-panel__grid,
-    .anw-pronunciation-panel__preview-controls {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
 
-  @media (max-width: 560px) {
-    .anw-pronunciation-panel,
-    .anw-cache-panel {
-      border-radius: 12px;
-      padding: 14px;
-    }
-
-    .anw-pronunciation-panel__header,
-    .anw-cache-panel__header,
-    .anw-pronunciation-panel__section-heading,
-    .anw-pronunciation-panel__footer,
-    .anw-cache-panel__preview-actions,
-    .anw-cache-panel__actions {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .anw-pronunciation-panel__grid,
-    .anw-pronunciation-panel__preview-controls,
-    .anw-pronunciation-panel__pauses dl,
-    .anw-cache-panel__metrics,
-    .anw-cache-panel__exact-capacity dl,
-    .anw-cache-panel__preview dl {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-pronunciation-panel button,
-    .anw-cache-panel button {
-      width: 100%;
-    }
-  }
 `;

@@ -1120,21 +1120,6 @@ export function ensureNovelStyles(): void {
     .mb-recycle-actions { display:flex; align-items:center; gap:10px; }
     .mb-recycle-more.qwenpaw-btn { justify-self:center; min-width:160px; margin-top:4px; }
 
-    @media (max-width:720px) {
-      .mb-center-page { padding:16px 14px 48px; }
-      .mb-center-actions { gap:12px; }
-      .mb-novel-card { margin-top:48px; }
-      .mb-novel-card-hero { grid-template-columns:96px minmax(0,1fr); gap:16px; min-height:188px; padding:18px 16px; }
-      .mb-novel-cover { width:96px; height:132px; }
-      .mb-novel-tool-row { grid-template-columns:repeat(5,minmax(0,1fr)); padding:14px 4px 8px; }
-      .mb-novel-tool-row button { min-width:0; font-size:10px; }
-      .mb-recycle-header { grid-template-columns:auto minmax(0,1fr); gap:10px; }
-      .mb-recycle-header > .qwenpaw-btn:last-child { grid-column:1/-1; justify-self:end; }
-      .mb-recycle-card { grid-template-columns:48px minmax(0,1fr); gap:12px; padding:14px; }
-      .mb-recycle-cover { width:48px; height:64px; }
-      .mb-recycle-actions { grid-column:1/-1; width:100%; }
-      .mb-recycle-actions > .qwenpaw-btn { flex:1; }
-    }
 
     .mb-private-page { min-height:100%; overflow:auto; padding:28px 34px 72px; background:#fff; }
     .mb-private-page:has(.anw-private-library) { height:100%; min-height:0; overflow:hidden; padding-bottom:28px; }
@@ -1383,8 +1368,8 @@ export function ensureNovelStyles(): void {
     /*
      * The host assistant changes the PawApp's real inline space without
      * changing the viewport. These anonymous container queries therefore own
-     * the workbench degradation; viewport media queries remain only a mobile
-     * fallback. The anw-workbench-main element is the nearest inline-size container.
+     * the workbench degradation. The anw-workbench-main element is the nearest
+     * inline-size container; no phone-viewport fallback is maintained.
      */
     .anw-workbench-frame .mb-workbench[data-assistant-overlay="true"] {
       container-type:inline-size;
@@ -2188,24 +2173,6 @@ export function ensureNovelStyles(): void {
       .mb-outline-footer { padding-top:10px; }
     }
 
-    @media (max-width: 720px) {
-      .mb-outline-workspace { min-height:0; }
-      .mb-outline-workspace > .mb-outline-selection-review-host,.mb-outline-workspace > .mb-outline-wizard { padding-top:2px; }
-      .mb-outline-heading-row { align-items:flex-start; }
-      .mb-outline-heading-row > .qwenpaw-btn { min-width:40px; }
-      .mb-outline-heading-row > .qwenpaw-btn > span:not(.qwenpaw-btn-icon) { display:none; }
-      .mb-outline-workspace-footer { flex-wrap:wrap; }
-      .mb-outline-workspace-footer>.qwenpaw-btn:first-child:not(:last-child) { width:100%; }
-      .mb-outline-candidate-characters { grid-template-columns:1fr; }
-      .mb-outline-modal { width:calc(100vw - 20px)!important; max-width:calc(100vw - 20px); }
-      .mb-outline-modal .qwenpaw-modal-header { padding-left:18px!important; }
-      .mb-outline-modal .qwenpaw-modal-body { padding-right:16px!important; padding-left:16px!important; }
-      .mb-outline-modal-title-copy small { display:none; }
-      .mb-outline-steps { padding-inline:2px; }
-      .mb-outline-step { font-size:11px; }
-      .mb-outline-step-body,.mb-outline-step-body.is-count { padding-right:16px; padding-left:16px; }
-      .mb-outline-footer { margin-right:-16px; margin-left:-16px; padding-right:16px; padding-left:16px; }
-    }
 
     @media (min-width: 2300px) {
       .mb-workbench { padding:34px 40px 42px; }
@@ -2225,196 +2192,6 @@ export function ensureNovelStyles(): void {
       .mb-role-overview-metrics>span { min-width:58px; }
     }
 
-    @media (max-width: 720px) {
-      .anw-workbench-main {
-        overflow-x:hidden;
-        overflow-y:auto;
-        overscroll-behavior-y:contain;
-        -webkit-overflow-scrolling:touch;
-      }
-      .mb-role-overview { align-items:stretch; flex-direction:column; gap:16px; border-radius:10px; padding:18px 16px; }
-      .mb-role-overview h2 { font-size:21px; }
-      .mb-role-overview-metrics { width:100%; }
-      .mb-role-overview-metrics>span { min-width:0; padding:8px 6px; }
-      .mb-role-section { padding:16px 14px 18px; }
-      .mb-role-section .mb-subtitle-row { align-items:flex-start; }
-      .mb-role-section-heading p { display:none; }
-      .mb-role-grid { grid-template-columns:1fr; }
-      .mb-role-card { min-height:154px; padding:14px; }
-      .mb-role-card > .qwenpaw-btn { opacity:1; }
-      .anw-page { padding:18px 14px 90px; }
-      .anw-page-header { align-items:center; }
-      .anw-page-title { font-size:23px; }
-      .anw-page-subtitle { display:none; }
-      .anw-quick-nav { width:100%; overflow-x:auto; }
-      .anw-quick-item { flex:1 0 auto; justify-content:center; }
-      .anw-library-grid { gap:14px; }
-      .anw-novel-hero { grid-template-columns:84px minmax(0,1fr); gap:14px; min-height:0; padding:14px; }
-      .anw-cover,.anw-cover-fallback { width:84px; height:116px; border-radius:9px; }
-      .anw-novel-title { font-size:17px; }
-      .anw-latest { margin-top:12px; }
-      .anw-novel-tools { padding-inline:10px; }
-      .anw-start { padding-inline:12px; }
-
-      .mb-workbench,
-      .anw-workbench-frame[data-assistant-density="compact"] .mb-workbench,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-workbench {
-        display:block;
-        height:auto;
-        min-height:100%;
-        padding:0 0 72px;
-        overflow:auto;
-        background:#fff;
-      }
-      .mb-book-rail,
-      .anw-workbench-frame[data-assistant-density="compact"] .mb-book-rail,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-rail {
-        position:static;
-        display:grid;
-        max-height:none;
-        grid-template-columns:84px minmax(0,1fr);
-        align-items:start;
-        column-gap:14px;
-        border:0;
-        border-radius:0;
-        padding:16px 14px 0;
-        overflow:visible;
-        box-shadow:none;
-      }
-      .mb-book-cover-wrap,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-book-cover-wrap {
-        grid-row:1/4;
-        width:84px;
-        max-width:84px;
-        margin:0;
-      }
-      .mb-book-rail > h1 { margin:2px 0 4px; font-size:18px; }
-      .mb-book-rail > p { min-height:0; max-height:38px; margin:0; }
-      .mb-book-stats { margin:4px 0 10px; }
-      .anw-current-model-card { grid-column:1/-1; margin:8px 0 0; }
-      .mb-book-nav {
-        position:sticky;
-        z-index:8;
-        top:0;
-        display:flex;
-        grid-column:1/-1;
-        gap:0;
-        margin:8px -14px 0;
-        border-top:1px solid #eff0f2;
-        border-bottom:1px solid #eff0f2;
-        padding:0;
-        overflow-x:auto;
-        background:#fff;
-      }
-      .mb-book-nav > button {
-        min-height:48px;
-        flex:1 0 auto;
-        justify-content:center;
-        border-radius:0;
-        padding:0 14px;
-        background:#fff;
-        white-space:nowrap;
-      }
-      .mb-book-nav > button.is-active {
-        outline:0;
-        border-bottom:2px solid #ff7548;
-        background:#fff;
-      }
-      .mb-back-center-wrap { grid-column:1/-1; margin:10px 0 0; padding:0 0 12px; }
-      .mb-workbench-main { width:100%; border:0; border-radius:0; overflow:visible; box-shadow:none; }
-      .mb-panel-header,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-header { min-height:64px; padding:14px 16px; }
-      .mb-panel-header > h2 { font-size:20px; }
-      .mb-panel-body,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body { padding:14px 14px 36px; }
-      .mb-panel-body.is-outline,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body.is-outline { padding-bottom:14px; }
-      .mb-panel-body.is-chapters,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-panel-body.is-chapters { padding:0; overflow:visible; }
-      .mb-panel-actions { gap:6px; }
-      .mb-chapter-header-search { display:none; }
-      .mb-chapter-sort.qwenpaw-btn { min-width:40px; padding-inline:8px!important; }
-      .mb-chapter-sort.qwenpaw-btn > span:not(.qwenpaw-btn-icon) { display:none; }
-      .mb-chapter-dashboard { display:block; }
-      .mb-chapter-master-detail,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-master-detail { display:block; }
-      .mb-chapter-volume-pane,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-volume-pane { border-right:0; border-bottom:1px solid #eceef1; padding:16px 14px 18px; overflow:visible; }
-      .mb-chapter-volume-list { grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; overflow:visible; }
-      .mb-volume-zero { grid-column:1/-1; }
-      .mb-chapter-volume-item { min-height:58px; border:1px solid #eff0f2; border-left-width:3px; border-radius:6px; padding:10px 10px 10px 12px; }
-      .mb-chapter-volume-item.is-ungrouped { margin-top:0; border-top-color:#eff0f2; }
-      .mb-chapter-detail-pane { overflow:visible; }
-      .mb-chapter-detail-header,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-detail-header { min-height:68px; padding:14px 16px; }
-      .mb-chapter-table,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-table { margin:14px; overflow-x:auto; }
-      .mb-chapter-table-head,.mb-chapter-table-row,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-table-head,
-      .anw-workbench-frame[data-assistant-density="constrained"] .mb-chapter-table-row { min-width:650px; grid-template-columns:minmax(230px,1fr) 120px 120px 36px 36px; }
-
-      .anw-project { display:block; padding:0 0 72px; overflow:auto; }
-      .anw-book-rail { position:static; border:0; border-radius:0; box-shadow:none; }
-      .anw-book-rail-top { display:grid; grid-template-columns:84px minmax(0,1fr); gap:14px; padding:16px; background:linear-gradient(135deg,#eefbff,#fff4ed); }
-      .anw-book-cover-large,.anw-book-cover-empty { grid-row:1/4; width:84px; height:116px; aspect-ratio:auto; border-radius:9px; }
-      .anw-book-title { margin:2px 0 4px; font-size:18px; }
-      .anw-book-description { max-height:38px; overflow:hidden; }
-      .anw-book-counts { margin-top:4px; }
-      .anw-project-nav { position:sticky; z-index:8; top:0; display:flex; gap:0; overflow-x:auto; padding:0; border-bottom:1px solid var(--anw-line); background:#fff; }
-      .anw-project-nav-button { flex:1 0 auto; justify-content:center; min-height:48px; border:0; border-bottom:2px solid transparent; border-radius:0; padding:0 14px; background:#fff; }
-      .anw-project-nav-button.is-active { border-bottom-color:var(--anw-orange); background:#fff; }
-      .anw-project-nav-button .anw-nav-label { display:block; }
-      .anw-project-main { min-height:520px; border:0; border-radius:0; box-shadow:none; }
-      .anw-panel-header { min-height:64px; padding:14px 16px; }
-      .anw-panel-title { font-size:18px; }
-      .anw-panel-body { padding:14px; }
-      .anw-panel-actions .qwenpaw-btn:not(.anw-primary-button) { display:none; }
-      .anw-chapter-row { grid-template-columns:minmax(0,1fr) auto; }
-      .anw-chapter-number { display:none; }
-      .anw-chapter-row-meta:last-child { display:none; }
-      .anw-entity-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-      .anw-volume-overview { grid-template-columns:1fr; }
-      .anw-clue-card { grid-template-columns:58px minmax(0,1fr); }
-      .anw-clue-state { grid-column:2; }
-
-      .anw-editor.has-chapter-tree,.anw-editor.has-chapter-tree.is-chapter-tree-collapsed { display:block; overflow:auto; }
-      .anw-chapter-tree { display:none; }
-      .anw-editor-content { height:auto; min-height:100%; overflow:visible; }
-      .anw-editor-topbar { width:100%; flex-wrap:wrap; gap:6px; margin:0; transform:none; border:0; border-bottom:1px solid var(--anw-line); border-radius:0; padding:8px 10px; box-shadow:none; }
-      .anw-editor.has-chapter-tree .anw-editor-topbar,
-      .anw-workbench-frame[data-assistant-density="constrained"] .anw-editor.has-chapter-tree .anw-editor-topbar { width:100%; }
-      .anw-editor-topbar > .qwenpaw-btn { min-width:0; flex:1 1 0; padding-inline:8px!important; }
-      .anw-current-model-inline { order:10; width:100%; min-width:0; flex:1 0 100%; flex-direction:row; align-items:center; justify-content:space-between; gap:8px; }
-      .anw-current-model-inline small,.anw-current-model-inline strong { max-width:48%; }
-      .anw-editor-scroll { padding:0 0 112px; }
-      .anw-editor-paper { min-height:100%; border:0; border-radius:0; padding:24px 20px 48px; box-shadow:none; }
-      .anw-editor-title { font-size:22px; }
-      .anw-editor-textarea { min-height:calc(100vh - 230px); font-size:16px; line-height:1.95; }
-      .anw-editor-footer { right:12px; bottom:10px; left:12px; overflow-x:auto; justify-content:flex-start; }
-      .anw-workflow-buttons { flex-wrap:nowrap; justify-content:flex-start; padding:7px; }
-      .anw-workflow-buttons .qwenpaw-btn { flex:0 0 auto; }
-      .mb-relation-overlay-stack { position:static; }
-      .mb-relation-overlay-stack > .qwenpaw-alert { width:100%; max-width:none; justify-self:stretch; }
-      .mb-relation-overlay-stack > .qwenpaw-alert .qwenpaw-alert-content { display:block; }
-      .mb-relation-overlay-stack > .qwenpaw-alert .qwenpaw-alert-message,.mb-relation-overlay-stack > .qwenpaw-alert .qwenpaw-alert-description { white-space:normal; }
-      .mb-relation-ai-copy { display:grid; gap:2px; }
-      .mb-relation-toolbar { position:static; align-items:stretch; }
-      .mb-relation-filter-tools { flex-basis:100%; grid-template-columns:1fr; }
-      .mb-relation-edit-tools { flex-wrap:wrap; }
-      .mb-relation-toolbar .qwenpaw-select,.mb-relation-toolbar .mb-relation-character-search { width:100%; }
-      .mb-relation-toolbar .mb-relation-scale { align-self:center; }
-      .mb-relation-view-tools { order:2; margin-left:0; }
-      .mb-relation-add { margin-left:auto; }
-      .mb-relation-stage { height:520px; min-height:520px; }
-      .mb-relation-canvas-shell:fullscreen { padding:8px; }
-      .mb-relation-canvas-shell:fullscreen .mb-relation-stage { height:auto; min-height:0; }
-      .mb-relation-accessible-list > header { align-items:start; flex-direction:column; gap:4px; }
-      .mb-relation-accessible-list ul { grid-template-columns:1fr; }
-      .mb-relationship-draft-grid { grid-template-columns:1fr; }
-    .mb-relationship-direction .qwenpaw-radio-group { display:grid; }
-      .mb-relationship-editor-body { padding:16px; }
-      html .qwenpaw-modal-root .qwenpaw-modal.mb-relationship-editor-modal .qwenpaw-modal-footer { padding:12px 16px!important; }
-    }
   `;
   document.head.appendChild(style);
 }

@@ -279,39 +279,6 @@ export const EMBEDDING_STYLES = String.raw`
     flex: 0 0 auto;
   }
 
-  @media (max-width: 720px) {
-    .anw-embedding-page {
-      padding: 12px;
-    }
-
-    .anw-embedding-grid,
-    .anw-embedding-metrics,
-    .anw-semantic-corpora,
-    .anw-embedding-steps {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-embedding-hero {
-      padding: 18px;
-    }
-
-    .anw-embedding-hero__tags {
-      justify-content: flex-start;
-    }
-
-    .anw-embedding-credential {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .anw-embedding-credential code {
-      justify-self: stretch;
-    }
-
-    .anw-embedding-actions > *,
-    .anw-embedding-inline-actions > * {
-      width: 100%;
-    }
-  }
 `;
 
 

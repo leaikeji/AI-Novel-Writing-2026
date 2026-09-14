@@ -5,7 +5,6 @@ import { T2_F_NARRATION_SETTINGS_PANEL_STYLES } from "./styles/t2-f";
 import { T2_G_NARRATION_READING_RULES_STYLES } from "./styles/t2-g";
 import { T4_CHAPTER_NARRATION_STYLES } from "./styles/t4-chapter";
 import { OFFICIAL_VOICE_LIBRARY_STYLES } from "./styles/voice-library";
-import { VOICE_LIFECYCLE_STYLES } from "./styles/voice-lifecycle";
 
 
 export const NARRATION_STYLE_ID = "ai-novel-world-2026-narration-ui" as const;
@@ -19,7 +18,6 @@ export const NARRATION_STYLES = [
   T2_G_NARRATION_READING_RULES_STYLES,
   T4_CHAPTER_NARRATION_STYLES,
   OFFICIAL_VOICE_LIBRARY_STYLES,
-  VOICE_LIFECYCLE_STYLES,
   String.raw`
     .anw-narration-character-section,
     .anw-narration-character-card-panel,
@@ -229,25 +227,6 @@ export const NARRATION_STYLES = [
       padding: 18px;
     }
 
-    @media (max-width: 560px) {
-      .mb-novel-tool-row.has-reading {
-        padding-inline: 12px;
-      }
-
-      .anw-narrator-current-voice {
-        align-items: stretch;
-        flex-direction: column;
-      }
-
-      .anw-narrator-current-voice__actions {
-        display: grid;
-      }
-
-      .anw-narrator-current-voice__actions button {
-        width: 100%;
-      }
-
-    }
   `,
 ].join("\n");
 

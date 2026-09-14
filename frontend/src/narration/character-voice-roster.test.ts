@@ -511,12 +511,10 @@ describe("CharacterVoiceRoster", () => {
     expect(layer.props.hidden).toBe(false);
   });
 
-  it("has narrow-screen wrapping, 44px targets and visible keyboard focus", () => {
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("@media (max-width: 768px)");
+  it("has 44px targets and visible keyboard focus", () => {
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("min-height: 44px");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-roster button:focus-visible");
     expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain(".anw-character-voice-drawer");
-    expect(T2_C_CHARACTER_VOICE_PANEL_STYLES).toContain("width: 100vw");
   });
 
   it("constrains the drawer to one viewport and gives its body the only vertical scrollbar", () => {
