@@ -20,7 +20,6 @@ import {
   canonicalChapterDocuments,
   canonicalVolumeRecords,
   chapterOrdinalFor,
-  ChapterTreeChapter,
   ChapterTreeVolume,
 } from "./chapter-tree";
 import { CREATIVE_CENTER_CHAT_PATH } from "./contracts";
@@ -155,9 +154,7 @@ import {
   type NarrationParagraphDescriptor,
   type ParagraphGutterController,
 } from "./narration/paragraph-gutter";
-import defaultNovelCover from "../assets/novel-cover-fengcunqu.jpg";
 import { navigateNovelSurface } from "./novel-surface-navigation";
-import { createNovelCoverView } from "./novel-cover";
 import { loadNovelWorkspace } from "./novel-navigation/api";
 import {
   CHAPTER_TREE_ROW_HEIGHT,
@@ -169,7 +166,6 @@ import {
 const host = window.QwenPaw.host;
 const React = host.React;
 const h = React.createElement;
-const NovelCoverView = createNovelCoverView(React);
 const ScriptReviewPanel = createScriptReviewPanel(React);
 const NARRATION_GATE_REFRESH_MILLISECONDS = 5_000;
 const {
@@ -183,13 +179,10 @@ const {
 const {
   ArrowLeftOutlined,
   BookOutlined,
-  BulbOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
-  ClockCircleOutlined,
   CopyOutlined,
   CaretRightFilled,
-  DatabaseOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
   EditOutlined,
@@ -200,12 +193,9 @@ const {
   PauseOutlined,
   SaveOutlined,
   SearchOutlined,
-  SettingOutlined,
   SoundOutlined,
   StepBackwardOutlined,
   StepForwardOutlined,
-  TeamOutlined,
-  UnorderedListOutlined,
   UserOutlined,
 } = host.antdIcons;
 const ChapterNarrationPanel = createChapterNarrationPanel(React, {
@@ -270,14 +260,6 @@ function replaceWorkbenchUrl(url: string): void {
 }
 
 
-function firstDocument(novel: NovelRecord): DocumentRecord | undefined {
-  return canonicalChapterDocuments(novel)[0]
-    ?? canonicalVolumeRecords(novel).flatMap((volume) => volume.documents)
-    .find((document) => document.kind === "chapter")
-    ?? canonicalVolumeRecords(novel).flatMap((volume) => volume.documents)[0];
-}
-
-
 function chapterNumberFor(novel: NovelRecord, documentId: string): number | undefined {
   return chapterOrdinalFor(novel, documentId);
 }
@@ -289,11 +271,6 @@ function documentDisplayTitle(novel: NovelRecord, document: DocumentRecord): str
   return chapterNumber === undefined
     ? document.title
     : formatChapterDisplayTitle(chapterNumber, document.title);
-}
-
-
-function novelCover(novel: NovelRecord, className = "anw-cover"): unknown {
-  return h(NovelCoverView, { novel, className, fallbackSrc: defaultNovelCover });
 }
 
 
@@ -437,30 +414,6 @@ interface ConflictDetail { current: DocumentRecord; }
 interface AssistantTitleInputRef {
   focus?: () => void;
   input?: AssistantTextControl | null;
-}
-
-
-function sectionLabel(section: ProjectSection): string {
-  return {
-    chapters: "章节",
-    outline: "大纲",
-    roles: "角色",
-    clues: "线索",
-    settings: "设定",
-    reading: "朗读",
-  }[section];
-}
-
-
-function sectionIcon(section: ProjectSection): any {
-  return {
-    chapters: FileTextOutlined,
-    outline: UnorderedListOutlined,
-    roles: TeamOutlined,
-    clues: BulbOutlined,
-    settings: SettingOutlined,
-    reading: SoundOutlined,
-  }[section];
 }
 
 
@@ -1876,7 +1829,11 @@ export function NovelWorkbench(props: NovelWorkbenchProps = {}) {
         generation,
         intent,
         forceReview: false,
-        reuseExistingAudio: launch.basicSingleNarrator === true,
+        // A deliberate update must preserve the fresh request so changed
+        // character/narrator authority can be frozen into a new Edition.
+        // Historical-audio recovery is only valid for first-time creation;
+        // otherwise it can replace the update workflow with an older request.
+        reuseExistingAudio: intent === "create" && launch.basicSingleNarrator === true,
         signal: controller.signal,
         saveStableSource: saveStableNarrationSource,
         isGenerationCurrent: (documentId, expectedGeneration) => (

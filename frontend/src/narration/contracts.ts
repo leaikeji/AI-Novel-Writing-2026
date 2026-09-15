@@ -1,7 +1,6 @@
 import {
   DEFAULT_ALIYUN_TTS_MODEL_ID,
   DEFAULT_TTS_PROVIDER_ID,
-  type TTSProviderSelection,
   type AliyunTTSModelId,
   type TTSProviderId,
 } from "./tts-provider";
@@ -953,8 +952,6 @@ type JsonRecord = Record<string, unknown>;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const GIT_REVISION_PATTERN = /^[a-f0-9]{40}$/;
-const OFFICIAL_PRESET_ID_PATTERN = /^onnx\.[A-Za-z][A-Za-z0-9]{0,79}$/;
-const MANIFEST_VOICE_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,79}$/;
 const SAFE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,95}$/;
 const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/;
 

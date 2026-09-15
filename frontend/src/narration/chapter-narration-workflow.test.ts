@@ -135,6 +135,27 @@ describe("resumeChapterNarrationWorkflow", () => {
     expect(deps.createWorkflow).toHaveBeenCalledOnce();
   });
 
+  it("显式更新即使收到恢复提示也保留新请求，不恢复历史音频", async () => {
+    const updateWorkflow = { ...workflow("review_required"), intent: "update" as const };
+    const recoverExisting = vi.fn(async () => workflow("ready", EDITION_ID));
+    const deps = dependencies({
+      createWorkflow: vi.fn(async (_documentId, request) => {
+        expect(request.intent).toBe("update");
+        return updateWorkflow;
+      }),
+      recoverExisting,
+    });
+
+    const result = await startChapterNarrationWorkflow({
+      ...options(deps),
+      intent: "update",
+      reuseExistingAudio: true,
+    });
+
+    expect(result.workflow).toBe(updateWorkflow);
+    expect(recoverExisting).not.toHaveBeenCalled();
+  });
+
   it("刷新后只恢复已知朗读请求，不保存或新建任务", async () => {
     const deps = dependencies({
       getWorkflow: vi.fn(async () => workflow("partial_ready", EDITION_ID)),

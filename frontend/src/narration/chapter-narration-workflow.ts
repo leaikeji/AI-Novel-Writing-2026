@@ -292,7 +292,7 @@ export async function startChapterNarrationWorkflow(
     );
     assertCurrent(options);
     workflow = await waitForActionableWorkflow(options, dependencies, workflow, controller.signal);
-    if (options.reuseExistingAudio) {
+    if (options.intent === "create" && options.reuseExistingAudio) {
       workflow = await (dependencies.recoverExisting ?? recoverExistingNarration)({
         novelId: options.novelId,
         documentId: options.documentId,
